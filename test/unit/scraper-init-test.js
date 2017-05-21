@@ -1,19 +1,21 @@
-var should = require('should');
-var proxyquire = require('proxyquire');
-var sinon = require('sinon');
-var path = require('path');
-var Scraper = require('../../lib/scraper');
-var Resource = require('../../lib/resource');
+'use strict';
 
-var testDirname = __dirname + '/.scraper-init-test';
-var urls = [ 'http://example.com' ];
+const should = require('should');
+const proxyquire = require('proxyquire').noCallThru();
+const sinon = require('sinon');
+const path = require('path');
+const Scraper = require('../../lib/scraper');
+const Resource = require('../../lib/resource');
+
+const testDirname = __dirname + '/.scraper-init-test';
+const urls = [ 'http://example.com' ];
 
 describe('Scraper initialization', function () {
 	describe('defaultFilename', function() {
-		var defaultsMock, Scraper;
+		var Scraper;
 
 		before(function() {
-			defaultsMock = { defaultFilename: 'dummyFilename.txt' };
+			var defaultsMock = { defaultFilename: 'dummyFilename.txt' };
 			Scraper = proxyquire('../../lib/scraper', {
 				'./config/defaults': defaultsMock
 			});
@@ -25,7 +27,7 @@ describe('Scraper initialization', function () {
 				directory: testDirname
 			});
 
-			s.options.defaultFilename.should.equalFileSystemPath(defaultsMock.defaultFilename);
+			s.options.defaultFilename.should.equalFileSystemPath('dummyFilename.txt');
 		});
 
 		it('should use defaultFilename sources if defaultFilename were passed', function () {
@@ -40,10 +42,10 @@ describe('Scraper initialization', function () {
 	});
 
 	describe('sources', function() {
-		var defaultsMock, Scraper;
+		var Scraper;
 
 		before(function() {
-			defaultsMock = { sources: ['1', '2', '3'] };
+			var defaultsMock = { sources: ['1', '2', '3'] };
 			Scraper = proxyquire('../../lib/scraper', {
 				'./config/defaults': defaultsMock
 			});
@@ -55,7 +57,7 @@ describe('Scraper initialization', function () {
 				directory: testDirname
 			});
 
-			s.options.sources.should.eql(defaultsMock.sources);
+			s.options.sources.should.eql(['1', '2', '3']);
 		});
 
 		it('should use passed sources if sources were passed', function () {
@@ -85,10 +87,10 @@ describe('Scraper initialization', function () {
 	});
 
 	describe('subdirectories', function () {
-		var defaultsMock, Scraper;
+		var Scraper;
 
 		before(function() {
-			defaultsMock = { directories: { directory: 'dir', extensions: ['.txt'] }, };
+			var defaultsMock = { subdirectories: [{ directory: 'dir', extensions: ['.txt'] }] };
 			Scraper = proxyquire('../../lib/scraper', {
 				'./config/defaults': defaultsMock
 			});
@@ -100,7 +102,20 @@ describe('Scraper initialization', function () {
 				directory: testDirname
 			});
 
-			s.options.subdirectories.should.eql(defaultsMock.subdirectories);
+			s.options.subdirectories.should.eql([{ directory: 'dir', extensions: ['.txt'] }]);
+		});
+
+		it('should convert extensions to lower case', function () {
+
+			var s = new Scraper({
+				urls: urls,
+				directory: testDirname,
+				subdirectories: [
+					{ directory: 'dir', extensions: ['.TXT'] }
+				]
+			});
+
+			s.options.subdirectories[0].extensions.should.eql(['.txt']);
 		});
 
 		it('should use passed subdirectories if subdirectories were passed', function () {
@@ -125,10 +140,10 @@ describe('Scraper initialization', function () {
 	});
 
 	describe('request', function () {
-		var defaultsMock, Scraper;
+		var Scraper;
 
 		before(function() {
-			defaultsMock = { request: { a: 1, b: 2 } };
+			var defaultsMock = { request: { a: 1, b: 2 } };
 			Scraper = proxyquire('../../lib/scraper', {
 				'./config/defaults': defaultsMock
 			});
@@ -140,7 +155,7 @@ describe('Scraper initialization', function () {
 				directory: testDirname
 			});
 
-			s.options.request.should.eql(defaultsMock.request);
+			s.options.request.should.eql({ a: 1, b: 2 });
 		});
 
 		it('should merge default and passed objects if request were passed', function () {
@@ -179,35 +194,6 @@ describe('Scraper initialization', function () {
 		});
 	});
 
-	describe('makeRequest', function () {
-		it('should bind request object to makeRequest method', function() {
-			var requestStub = sinon.stub().resolves();
-			var Scraper = proxyquire('../../lib/scraper', {
-				'./request': requestStub,
-				'./config/defaults': {
-					request: {}
-				}
-			});
-
-			var reqOpts = {
-				headers: {
-					'User-Agent': 'Mozilla/5.0 (Linux; Android 4.2.1;'
-				}
-			};
-
-			var s = new Scraper({
-				urls: { url: 'http://first-url.com' },
-				directory: testDirname,
-				request: reqOpts
-			});
-
-			return s.makeRequest('http://example.com').then(function() {
-				requestStub.calledOnce.should.be.eql(true);
-				requestStub.calledWith(reqOpts).should.be.eql(true);
-			});
-		});
-	});
-
 	describe('resourceHandler', function () {
 		it('should create resourceHandler with correct params', function() {
 			var ResourceHandlerStub = sinon.stub();
@@ -240,7 +226,7 @@ describe('Scraper initialization', function () {
 		});
 	});
 
-	describe('originalResources', function () {
+	describe('resources', function () {
 		it('should create Resource object for each url', function() {
 			var s = new Scraper({
 				urls: [
@@ -251,13 +237,13 @@ describe('Scraper initialization', function () {
 				directory: testDirname
 			});
 
-			s.originalResources.should.be.an.instanceOf(Array).and.have.length(3);
-			s.originalResources[0].should.be.an.instanceOf(Resource);
-			s.originalResources[0].url.should.be.eql('http://first-url.com');
-			s.originalResources[1].should.be.an.instanceOf(Resource);
-			s.originalResources[1].url.should.be.eql('http://second-url.com');
-			s.originalResources[2].should.be.an.instanceOf(Resource);
-			s.originalResources[2].url.should.be.eql('http://third-url.com');
+			s.resources.should.be.an.instanceOf(Array).and.have.length(3);
+			s.resources[0].should.be.an.instanceOf(Resource);
+			s.resources[0].url.should.be.eql('http://first-url.com');
+			s.resources[1].should.be.an.instanceOf(Resource);
+			s.resources[1].url.should.be.eql('http://second-url.com');
+			s.resources[2].should.be.an.instanceOf(Resource);
+			s.resources[2].url.should.be.eql('http://third-url.com');
 		});
 
 		it('should use urls filename', function() {
@@ -265,7 +251,7 @@ describe('Scraper initialization', function () {
 				urls: { url: 'http://first-url.com', filename: 'first.html' },
 				directory: testDirname
 			});
-			s.originalResources[0].getFilename().should.equalFileSystemPath('first.html');
+			s.resources[0].getFilename().should.equalFileSystemPath('first.html');
 		});
 
 		it('should use default filename if no url filename was provided', function() {
@@ -274,7 +260,46 @@ describe('Scraper initialization', function () {
 				defaultFilename: 'default.html',
 				directory: testDirname
 			});
-			s.originalResources[0].getFilename().should.equalFileSystemPath('default.html');
+			s.resources[0].getFilename().should.equalFileSystemPath('default.html');
+		});
+	});
+
+	describe('resourceSaver', () => {
+		it('should create default resourceSaver with correct params', () => {
+			const ResourceSaverStub = sinon.stub();
+			const Scraper = proxyquire('../../lib/scraper', {
+				'./resource-saver': ResourceSaverStub
+			});
+
+			const options = {
+				urls: { url: 'http://first-url.com' },
+				directory: testDirname,
+				maxDepth: 100
+			};
+
+			const s = new Scraper(options);
+			ResourceSaverStub.calledOnce.should.be.eql(true);
+			ResourceSaverStub.args[0][0].should.be.eql(s.options);
+		});
+
+		it('should create custom resourceSaver with correct params', () => {
+			const DefaultResourceSaverStub = sinon.stub();
+			const Scraper = proxyquire('../../lib/scraper', {
+				'./resource-saver': DefaultResourceSaverStub
+			});
+			const CustomResourceSaverStub = sinon.stub();
+
+			const options = {
+				urls: { url: 'http://first-url.com' },
+				directory: testDirname,
+				maxDepth: 100,
+				resourceSaver: CustomResourceSaverStub
+			};
+
+			const s = new Scraper(options);
+			CustomResourceSaverStub.calledOnce.should.be.eql(true);
+			CustomResourceSaverStub.args[0][0].should.be.eql(s.options);
+			DefaultResourceSaverStub.called.should.be.eql(false);
 		});
 	});
 });

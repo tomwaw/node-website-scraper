@@ -5,7 +5,7 @@ var sinon = require('sinon');
 var Resource = require('../../../lib/resource');
 var byTypeFilenameGenerator = require('../../../lib/filename-generator/by-type');
 
-describe('byTypeFilenameGenerator', function() {
+describe('FilenameGenerator: byType', function() {
 	it('should return resource filename', function() {
 		var r = new Resource('http://example.com/a.png', 'b.png');
 		var filename = byTypeFilenameGenerator(r, {}, []);
@@ -56,6 +56,18 @@ describe('byTypeFilenameGenerator', function() {
 		var filename = byTypeFilenameGenerator(r, options, []);
 		filename.should.equalFileSystemPath('img/a.png');
 	});
+
+    it('should return filename with correct subdirectory when string cases are different', function() {
+        var options = {
+            subdirectories: [
+                { directory: 'img', extensions: ['.png'] }
+            ]
+        };
+
+        var r = new Resource('http://example.com/a.PNG');
+        var f = byTypeFilenameGenerator(r, options, []);
+        f.should.equalFileSystemPath('img/a.PNG');
+    });
 
 	it('should return different filename if desired filename is occupied', function() {
 		var r = new Resource('http://second-example.com/a.png');
@@ -110,5 +122,15 @@ describe('byTypeFilenameGenerator', function() {
 		should(f2).not.be.eql(f1);
 
 		should(f2).not.be.eql(f1);
+	});
+
+	it('should return decoded url-based filename', function() {
+		var r = new Resource('https://developer.mozilla.org/ru/docs/JavaScript_%D1%88%D0%B5%D0%BB%D0%BB%D1%8B');
+		var filename = byTypeFilenameGenerator(r, {}, []);
+		filename.should.equalFileSystemPath('JavaScript_шеллы');
+
+		var r2 = new Resource('https://developer.mozilla.org/Hello%20G%C3%BCnter.png');
+		var filename2 = byTypeFilenameGenerator(r2, {}, []);
+		filename2.should.equalFileSystemPath('Hello Günter.png');
 	});
 });

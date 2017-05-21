@@ -1,14 +1,13 @@
+'use strict';
+
 var should = require('should');
 var sinon = require('sinon');
-require('sinon-as-promised');
 var nock = require('nock');
-var proxyquire = require('proxyquire');
+var proxyquire = require('proxyquire').noCallThru();
 var fs = require('fs-extra');
 var path = require('path');
-var _ = require('lodash');
 var Scraper = require('../../lib/scraper');
 var Resource = require('../../lib/resource');
-var Promise = require('bluebird');
 
 var testDirname = __dirname + '/.scraper-test';
 var urls = [ 'http://example.com' ];
@@ -26,86 +25,6 @@ describe('Scraper', function () {
 		fs.removeSync(testDirname);
 	});
 
-	describe('#validate', function () {
-		it('should return resolved promise if everything is ok', function () {
-			var s = new Scraper({
-				urls: urls,
-				directory: 'good/directory'
-			});
-
-			return s.validate().then(function() {
-				should(true).eql(true);
-			});
-		});
-
-		it('should return rejected promise if no directory was provided', function () {
-			var s = new Scraper({
-				urls: urls
-			});
-
-			return s.validate().then(function() {
-				should(true).be.eql(false);
-			}, function(err) {
-				err.should.be.an.instanceOf(Error);
-				err.message.should.match(/^Incorrect directory/);
-			});
-		});
-
-		it('should return rejected promise if directory is not correct', function () {
-			var s1 = new Scraper({
-				urls: urls,
-				directory: ''
-			});
-
-			return s1.validate().then(function() {
-				should(true).be.eql(false);
-			}, function(err) {
-				err.should.be.an.instanceOf(Error);
-				err.message.should.match(/^Incorrect directory/);
-			});
-
-			var s2 = new Scraper({
-				urls: urls,
-				directory: { name: '/incorrect/directory' }
-			});
-
-			return s2.validate().then(function() {
-				should(true).be.eql(false);
-			}, function(err) {
-				err.should.be.an.instanceOf(Error);
-				err.message.should.match(/^Incorrect directory/);
-			});
-
-			var s3 = new Scraper({
-				urls: urls,
-				directory: 42
-			});
-
-			return s3.validate().then(function() {
-				should(true).be.eql(false);
-			}, function(err) {
-				err.should.be.an.instanceOf(Error);
-				err.message.should.match(/^Incorrect directory/);
-			});
-		});
-
-		it('should return rejected promise if directory exists', function() {
-			fs.mkdirpSync(testDirname);
-
-			var s = new Scraper({
-				urls: urls,
-				directory: testDirname
-			});
-
-			return s.validate().then(function() {
-				should(true).be.eql(false);
-			}, function(err) {
-				err.should.be.an.instanceOf(Error);
-				err.message.should.match(/^Directory (.*?) exists/);
-			});
-		});
-	});
-
 	describe('#load', function() {
 		it('should create directory', function() {
 			nock('http://example.com').get('/').reply(200, 'OK');
@@ -120,26 +39,7 @@ describe('Scraper', function () {
 			});
 		});
 
-		it('should call loadResource for each url', function(done) {
-			nock('http://first-url.com').get('/').reply(200, 'OK');
-			nock('http://second-url.com').get('/').reply(200, 'OK');
-
-			var s = new Scraper({
-				urls: [
-					'http://first-url.com',
-					'http://second-url.com'
-				],
-				directory: testDirname
-			});
-
-			var loadResourceSpy = sinon.spy(s, 'loadResource');
-			s.load().then(function() {
-				loadResourceSpy.calledTwice.should.be.eql(true);
-				done();
-			}).catch(done);
-		});
-
-		it('should return array of objects with url, filename and assets', function(done) {
+		it('should return array of objects with url, filename and children', function() {
 			nock('http://first-url.com').get('/').reply(200, 'OK');
 			nock('http://second-url.com').get('/').reply(500);
 
@@ -151,13 +51,12 @@ describe('Scraper', function () {
 				directory: testDirname
 			});
 
-			s.load().then(function(res) {
+			return s.load().then(function(res) {
 				res.should.be.instanceOf(Array);
 				res.should.have.length(2);
-				res[0].should.be.instanceOf(Resource).and.have.properties(['url', 'filename', 'assets']);
-				res[1].should.be.instanceOf(Resource).and.have.properties(['url', 'filename', 'assets']);
-				done();
-			}).catch(done);
+				res[0].should.be.instanceOf(Resource).and.have.properties(['url', 'filename', 'children']);
+				res[1].should.be.instanceOf(Resource).and.have.properties(['url', 'filename', 'children']);
+			});
 		});
 	});
 
@@ -216,59 +115,34 @@ describe('Scraper', function () {
 		});
 	});
 
-	describe('#getLoadedResource', function() {
-		it('should find nothing if no resource with same url was loaded',function() {
-			var s = new Scraper({
-				urls: 'http://example.com',
-				directory: testDirname
-			});
-			var a = new Resource('http://first-resource.com');
-			var loaded = s.getLoadedResource(a.getUrl());
-			should(loaded).be.eql(undefined);
-		});
-
-		it('should find loaded resource with same url', function() {
-			var s = new Scraper({
-				urls: 'http://example.com',
-				directory: testDirname
-			});
-
-			var a = new Resource('http://first-resource.com');
-			s.addLoadedResource(a.getUrl(), a);
-
-			var b = new Resource('http://first-resource.com');
-			var c = new Resource('http://first-resource.com/');
-			var d = new Resource('http://first-resource.com?');
-			should(s.getLoadedResource(b.getUrl())).be.equal(a);
-			should(s.getLoadedResource(c.getUrl())).be.equal(a);
-			should(s.getLoadedResource(d.getUrl())).be.equal(a);
-		});
-	});
-
 	describe('#loadResource', function() {
-		it('should not save the same resource twice (should skip already loaded)', function() {
+		it('should add different resource to the map', function() {
 			var s = new Scraper({
 				urls: 'http://example.com',
 				directory: testDirname
 			});
-			s.getResourceHandler = sinon.stub().returns(_.noop);
 
-			sinon.stub(s, 'getLoadedResource')
-				.withArgs('http://example.com/a.png')
-				.onFirstCall().returns()
-				.onSecondCall().returns(Promise.resolve());
+			var r1 = new Resource('http://example.com/a1.png', 'a1.png');
+			var r2 = new Resource('http://example.com/a2.png', 'a2.png');
+			var r3 = new Resource('http://example.com/a3.png', 'a3.png');
 
-			sinon.spy(s, 'addLoadedResource');
+			s.loadResource(r1);
+			s.loadResource(r2);
+			s.loadResource(r3);
+			s.loadedResources.size.should.be.eql(3);
+		});
+
+		it('should not add the same resource twice', function() {
+			var s = new Scraper({
+				urls: 'http://example.com',
+				directory: testDirname
+			});
 
 			var r = new Resource('http://example.com/a.png', 'a.png');
 
 			s.loadResource(r);
-			s.getLoadedResource.calledOnce.should.be.eql(true);
-			s.addLoadedResource.calledOnce.should.be.eql(true);
-
 			s.loadResource(r);
-			s.getLoadedResource.calledTwice.should.be.eql(true);
-			s.addLoadedResource.calledOnce.should.be.eql(true);
+			s.loadedResources.size.should.be.eql(1);
 		});
 	});
 
@@ -278,11 +152,11 @@ describe('Scraper', function () {
 				urls: 'http://example.com',
 				directory: testDirname
 			});
-			s.getResourceHandler = sinon.stub().returns(_.noop);
-			sinon.spy(s, 'addLoadedResource');
 
 			var r = new Resource('http://example.com/a.png', 'a.png');
 			r.setText('some text');
+
+			s.resourceHandler.handleResource = sinon.stub().resolves(r);
 
 			return s.saveResource(r).then(function() {
 				var text = fs.readFileSync(path.join(testDirname, r.getFilename())).toString();
@@ -431,6 +305,32 @@ describe('Scraper', function () {
 				s.handleError.calledOnce.should.be.eql(true);
 			});
 		});
+
+		it('should update resource data with data returned from request', () => {
+			let metadata = {
+				solarSystemPlanets: [ 'Mercury', 'Venus', 'Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune' ]
+			};
+
+			let s = new Scraper({
+				urls: 'http://example.com',
+				directory: testDirname
+			});
+			s.request.get = sinon.stub().resolves({
+				url: 'http://google.com',
+				body: 'test body',
+				mimeType: 'text/html',
+				metadata: metadata
+			});
+
+			let r = new Resource('http://example.com');
+
+			return s.requestResource(r).finally(function() {
+				r.getText().should.be.eql('test body');
+				r.getUrl().should.be.eql('http://google.com');
+				r.getType().should.be.eql('html');
+				r.metadata.should.be.eql(metadata);
+			});
+		})
 	});
 
 	describe('#handleError', function() {
@@ -460,7 +360,7 @@ describe('Scraper', function () {
 	});
 
 	describe('#scrape', function() {
-		it('should call methods in sequence', function() {
+		it('should call load', function() {
 			nock('http://example.com').get('/').reply(200, 'OK');
 
 			var s = new Scraper({
@@ -468,13 +368,10 @@ describe('Scraper', function () {
 				directory: testDirname
 			});
 
-			var validateSpy = sinon.spy(s, 'validate');
 			var loadSpy = sinon.spy(s, 'load');
 
 			return s.scrape().then(function() {
-				validateSpy.calledOnce.should.be.eql(true);
 				loadSpy.calledOnce.should.be.eql(true);
-				loadSpy.calledAfter(validateSpy).should.be.eql(true);
 			});
 		});
 
@@ -497,6 +394,16 @@ describe('Scraper', function () {
 				err.should.be.instanceOf(Error);
 				err.message.should.be.eql('Awful error');
 			});
+		});
+	});
+
+	describe('defaults', function() {
+		it('should export defaults', function() {
+			var defaultsMock = { subdirectories: null, recursive: true, sources: [] };
+			Scraper = proxyquire('../../lib/scraper', {
+				'./config/defaults': defaultsMock
+			});
+			should(Scraper.defaults).be.eql({ subdirectories: null, recursive: true, sources: [] });
 		});
 	});
 });

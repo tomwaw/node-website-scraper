@@ -1,30 +1,11 @@
 var should = require('should');
 var sinon = require('sinon');
-var Bluebird = require('bluebird');
-require('sinon-as-promised')(Bluebird);
+var Promise = require('bluebird');
 var proxyquire = require('proxyquire');
 var Resource = require('../../../lib/resource');
+var ResourceHandler = require('../../../lib/resource-handler');
 
 describe('ResourceHandler', function() {
-	var ResourceHandler;
-	var noopStub;
-	var cssLoadStub;
-	var htmlLoadStub;
-
-	beforeEach(function() {
-		noopStub = sinon.stub().resolves();
-		cssLoadStub = sinon.stub().resolves();
-		htmlLoadStub = sinon.stub().resolves();
-
-		ResourceHandler = proxyquire('../../../lib/resource-handler', {
-			'lodash': {
-				'noop': noopStub
-			},
-			'./html': htmlLoadStub,
-			'./css': cssLoadStub
-		});
-	});
-
 	describe('constructor', function() {
 		it('should pick supported options', function() {
 			var options = {
@@ -47,83 +28,102 @@ describe('ResourceHandler', function() {
 			var resHandler = new ResourceHandler({}, context);
 			resHandler.context.should.eql(context);
 		});
+
+		it('should init specific resource handlers', function() {
+			var htmlHandlerStub = sinon.stub();
+			var cssHandlerStub = sinon.stub();
+
+			var ResourceHandler = proxyquire('../../../lib/resource-handler', {
+				'./html': htmlHandlerStub,
+				'./css': cssHandlerStub
+			});
+
+			var handleChildResStub = sinon.stub(ResourceHandler.prototype, 'handleChildrenResources').returns(Promise.resolve());
+			var options = { defaultFilename: 'test' };
+			var context = { dummy: 'context' };
+
+			var resHandler = new ResourceHandler(options, context);
+			should.exist(resHandler.htmlHandler);
+			should.exist(resHandler.cssHandler);
+
+			handleChildResStub.called.should.be.eql(false);
+
+			htmlHandlerStub.calledOnce.should.be.eql(true);
+			htmlHandlerStub.args[0][0].should.be.eql(options);
+			htmlHandlerStub.args[0][1]();
+			handleChildResStub.calledOnce.should.be.eql(true);
+
+			cssHandlerStub.calledOnce.should.be.eql(true);
+			cssHandlerStub.args[0][0].should.be.eql(options);
+			cssHandlerStub.args[0][1]();
+			handleChildResStub.calledTwice.should.be.eql(true);
+
+			handleChildResStub.restore();
+		});
 	});
 
 	describe('#getResourceHandler', function() {
-		it('should return css loader if file has css type', function() {
-			var options = { maxDepth: 2 };
+		var resourceHandler;
 
+		beforeEach(function() {
+			resourceHandler = new ResourceHandler({});
+		});
+
+		it('should return css handler if file has css type', function() {
 			var r = new Resource('http://example.com/');
 			sinon.stub(r, 'getType').returns('css');
 
-			var resHandler = new ResourceHandler(options);
-
-			var handleResource = resHandler.getResourceHandler(r);
-			return handleResource({}, r).then(function() {
-				noopStub.called.should.be.eql(false);
-				cssLoadStub.called.should.be.eql(true);
-				htmlLoadStub.called.should.be.eql(false);
-			});
+			var specificResourceHandler = resourceHandler.getResourceHandler(r);
+			specificResourceHandler.should.be.eql(resourceHandler.cssHandler);
 		});
 
-		it('should return html & css loader if file has html type', function() {
-			var options = { maxDepth: 2 };
-
+		it('should return html handler if file has html type', function() {
 			var r = new Resource('http://example.com/');
 			sinon.stub(r, 'getType').returns('html');
 
-			var resHandler = new ResourceHandler(options);
-
-			var handleResource = resHandler.getResourceHandler(r);
-			return handleResource({}, r).then(function() {
-				noopStub.called.should.be.eql(false);
-				cssLoadStub.called.should.be.eql(true);
-				htmlLoadStub.called.should.be.eql(true);
-			});
+			var specificResourceHandler = resourceHandler.getResourceHandler(r);
+			specificResourceHandler.should.be.eql(resourceHandler.htmlHandler);
 		});
 
-		it('should return noop if file has other type', function() {
-			var options = { maxDepth: 2 };
-
+		it('should return null if file has other type', function() {
 			var r = new Resource('http://example.com/');
 			sinon.stub(r, 'getType').returns('other');
 
-			var resHandler = new ResourceHandler(options);
-
-			var handleResource = resHandler.getResourceHandler(r);
-			return handleResource({}, r).then(function() {
-				noopStub.called.should.be.eql(true);
-				cssLoadStub.called.should.be.eql(false);
-				htmlLoadStub.called.should.be.eql(false);
-			});
+			var specificResourceHandler = resourceHandler.getResourceHandler(r);
+			should(specificResourceHandler).be.eql(null);
 		});
 	});
 
 	describe('#handleResource', function() {
-		it('should call getResourceHandler and create correct context', function() {
+		var resHandler;
+
+		beforeEach(function() {
 			var options = { defaultFilename: 'test' };
 			var context = {
 				requestResource: sinon.stub().resolves(),
 				loadResource: sinon.stub().resolves()
 			};
-			var resHandler = new ResourceHandler(options, context);
-			var getHandlerStub = sinon.stub().resolves();
-			resHandler.getResourceHandler = sinon.stub().returns(getHandlerStub);
-			var handleChildResStub = sinon.stub(ResourceHandler.prototype, 'handleChildrenResources').resolves();
+			resHandler = new ResourceHandler(options, context);
+		});
+
+		it('should call getResourceHandler and execute specific resource handler', function() {
+			var specificResourceHandleStub = sinon.stub().resolves();
+			resHandler.getResourceHandler = sinon.stub().returns({
+				handle: specificResourceHandleStub
+			});
 
 			var r = new Resource('http://example.com');
 			return resHandler.handleResource(r).then(function() {
-				// options
-				getHandlerStub.calledOnce.should.be.eql(true);
-				getHandlerStub.args[0][0].options.should.be.eql(options);
+				specificResourceHandleStub.args[0][0].should.be.eql(r);
+			});
+		});
 
-				// handleChildrenResources callback
-				handleChildResStub.called.should.be.eql(false);
-				getHandlerStub.args[0][0].handleChildrenResources();
-				handleChildResStub.called.should.be.eql(true);
+		it('should call getResourceHandler and return resolved promise if no specific handler found', function() {
+			resHandler.getResourceHandler = sinon.stub().returns(null);
 
-				// resource
-				getHandlerStub.args[0][1].should.be.eql(r);
+			var r = new Resource('http://example.com');
+			return resHandler.handleResource(r).then(function(returnedResource) {
+				should(returnedResource).be.eql(r);
 			});
 		});
 	});
@@ -139,8 +139,8 @@ describe('ResourceHandler', function() {
 			parentResource = new Resource('http://example.com', 'test.txt');
 
 			scraperContext = {
-				requestResource: sinon.stub().resolves(),
-				loadResource: sinon.stub().resolves()
+				requestResource: sinon.stub().returns(Promise.resolve()),
+				loadResource: sinon.stub().returns(Promise.resolve())
 			};
 
 			resHandler = new ResourceHandler({defaultFilename: 'index.html'}, scraperContext);
@@ -176,18 +176,6 @@ describe('ResourceHandler', function() {
 			});
 		});
 
-		it('should call loadResource with resource returned by requestResource', function () {
-			pathContainer.getPaths.returns(['http://example.com/child']);
-
-			var childResourceRespondedMock = new Resource('http://example.com/child', 'child.png');
-			scraperContext.requestResource.resolves(childResourceRespondedMock);
-
-			return resHandler.handleChildrenResources(pathContainer, parentResource).then(function () {
-				scraperContext.loadResource.calledOnce.should.be.eql(true);
-				scraperContext.loadResource.args[0][0].should.be.eql(childResourceRespondedMock);
-			});
-		});
-
 		it('should update paths in text with local files returned by requestResource', function () {
 			pathContainer.getPaths.returns([
 				'http://first.com/img/a.jpg',
@@ -195,9 +183,9 @@ describe('ResourceHandler', function() {
 				'http://second.com/img/c.jpg'
 			]);
 
-			scraperContext.requestResource.onFirstCall().resolves(new Resource('http://first.com/img/a.jpg', 'local/a.jpg'));
-			scraperContext.requestResource.onSecondCall().resolves(new Resource('http://first.com/b.jpg', 'local/b.jpg'));
-			scraperContext.requestResource.onThirdCall().resolves(new Resource('http://second.com/img/c.jpg', 'local/c.jpg'));
+			scraperContext.requestResource.onFirstCall().returns(Promise.resolve(new Resource('http://first.com/img/a.jpg', 'local/a.jpg')));
+			scraperContext.requestResource.onSecondCall().returns(Promise.resolve(new Resource('http://first.com/b.jpg', 'local/b.jpg')));
+			scraperContext.requestResource.onThirdCall().returns(Promise.resolve(new Resource('http://second.com/img/c.jpg', 'local/c.jpg')));
 
 			var updateChildSpy = sinon.spy(parentResource, 'updateChild');
 
@@ -228,9 +216,9 @@ describe('ResourceHandler', function() {
 				'http://second.com/img/c.jpg'
 			]);
 
-			scraperContext.requestResource.onFirstCall().resolves(null);
-			scraperContext.requestResource.onSecondCall().resolves(null);
-			scraperContext.requestResource.onThirdCall().resolves(new Resource('http://second.com/img/c.jpg', 'local/c.jpg'));
+			scraperContext.requestResource.onFirstCall().returns(Promise.resolve(null));
+			scraperContext.requestResource.onSecondCall().returns(Promise.resolve(null));
+			scraperContext.requestResource.onThirdCall().returns(Promise.resolve(new Resource('http://second.com/img/c.jpg', 'local/c.jpg')));
 
 			var updateChildSpy = sinon.spy(parentResource, 'updateChild');
 
@@ -255,9 +243,9 @@ describe('ResourceHandler', function() {
 
 			pathContainer.updateText.returns('UPDATED TEXT');
 
-			scraperContext.requestResource.onFirstCall().resolves(new Resource('http://first.com/img/a.jpg', 'local/a.jpg'));
-			scraperContext.requestResource.onSecondCall().resolves(null);
-			scraperContext.requestResource.onThirdCall().rejects(new Error('some error'));
+			scraperContext.requestResource.onFirstCall().returns(Promise.resolve(new Resource('http://first.com/img/a.jpg', 'local/a.jpg')));
+			scraperContext.requestResource.onSecondCall().returns(Promise.resolve(null));
+			scraperContext.requestResource.onThirdCall().returns(Promise.reject(new Error('some error')));
 
 			return resHandler.handleChildrenResources(pathContainer, parentResource).then(function (updatedText) {
 				updatedText.should.be.eql('UPDATED TEXT');
@@ -268,7 +256,7 @@ describe('ResourceHandler', function() {
 			it('should keep hash in urls', function () {
 				var resourceStub = new Resource('http://example.com/page1.html', 'local/page1.html');
 				sinon.stub(resourceStub, 'getType').returns('html');
-				scraperContext.requestResource.onFirstCall().resolves(resourceStub);
+				scraperContext.requestResource.onFirstCall().returns(Promise.resolve(resourceStub));
 
 				pathContainer.getPaths.returns(['http://example.com/page1.html#hash']);
 
@@ -287,7 +275,7 @@ describe('ResourceHandler', function() {
 		describe('prettifyUrls', function () {
 			it('should not prettifyUrls by default', function() {
 				var resourceStub = new Resource('http://example.com/other-page/index.html', 'other-page/index.html');
-				scraperContext.requestResource.onFirstCall().resolves(resourceStub);
+				scraperContext.requestResource.onFirstCall().returns(Promise.resolve(resourceStub));
 
 				pathContainer.getPaths.returns(['http://example.com/other-page/index.html']);
 
@@ -305,7 +293,7 @@ describe('ResourceHandler', function() {
 
 			it('should prettifyUrls if specified', function() {
 				var resourceStub = new Resource('http://example.com/other-page/index.html', 'other-page/index.html');
-				scraperContext.requestResource.onFirstCall().resolves(resourceStub);
+				scraperContext.requestResource.onFirstCall().returns(Promise.resolve(resourceStub));
 
 				pathContainer.getPaths.returns(['http://example.com/other-page/index.html']);
 				resHandler.options.prettifyUrls = true;
